@@ -14,9 +14,8 @@ Built with **React Native + Expo (SDK 57) + TypeScript** and **Expo Router**.
   quantities, rates, discounts, and per-line GST
 - 🧮 **Correct GST math** — 0 / 5 / 12 / 18 / 28% slabs, CGST + SGST split,
   inclusive (GST in price) or exclusive (GST extra) modes, round-off
-- 📄 **Professional PDF** — brand header, item table, GST breakdown, amount in words,
-  notes, terms, bank details, and signature block
-- 📤 **Share** — export and share the PDF via WhatsApp, email, or any app
+- 📄 **Multiple export formats** — download the quotation as **PDF**, **Word (.doc)**, **HTML**, or **plain text**; export straight to the device or share via WhatsApp/email
+- 📤 **Share** — export and share via WhatsApp, email, or any app
 - 📊 **Tracking** — statuses (draft / sent / accepted / rejected), totals dashboard
 - 💾 **Offline-first** — everything (profile, products, quotes) is stored on the device
 
@@ -64,6 +63,8 @@ src/
   lib/
     gst.ts              # GST calculation engine
     pdf.ts              # HTML → PDF rendering + sharing
+    export-content.ts   # DOC / HTML / TXT document builders
+    exporters.ts        # download & share logic (Android SAF, share sheet, web)
     storage.ts          # AsyncStorage persistence
     format.ts           # ₹ formatting, dates, amount-in-words
     types.ts            # data model

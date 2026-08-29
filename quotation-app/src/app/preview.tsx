@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,21 +13,44 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useApp } from '@/context/app-context';
 import { calcQuote } from '@/lib/gst';
 import { amountInWords, formatDate, inr } from '@/lib/format';
-import { buildQuotePdf, sharePdf } from '@/lib/pdf';
-import { Badge, Button, Card, palette, Screen } from '@/components/ui';
+import { exportQuote, EXPORT_OPTIONS, ExportFormat, ExportOutcome } from '@/lib/exporters';
+import { Badge, Button, Card, palette, Screen, SectionHeader } from '@/components/ui';
 
 export default function PreviewScreen() {
   const { id, share } = useLocalSearchParams<{ id: string; share?: string }>();
   const { profile, quotes, setQuotes } = useApp();
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [busyFormat, setBusyFormat] = useState<ExportFormat | null>(null);
 
   const quote = useMemo(() => quotes.find((q) => q.id === id), [quotes, id]);
   const calc = useMemo(() => (quote ? calcQuote(quote.items) : null), [quote]);
 
+  const doExport = async (format: ExportFormat) => {
+    if (!quote || busyFormat) return;
+    setBusyFormat(format);
+    try {
+      const outcome: ExportOutcome = await exportQuote(profile, quote, format);
+      setExportOpen(false);
+      Alert.alert(
+        outcome.format === 'pdf' && outcome.action === 'printed' ? 'Print / Save as PDF' : 'Quotation exported',
+        outcome.detail,
+        [
+          {
+            text: outcome.action === 'printed' ? 'OK' : 'Done',
+          },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Export failed', String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusyFormat(null);
+    }
+  };
+
   useEffect(() => {
     if (share === '1' && quote) {
-      doShare();
+      void doExport('pdf');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [share, quote?.id]);
@@ -39,19 +63,6 @@ export default function PreviewScreen() {
       </Screen>
     );
   }
-
-  const doShare = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const uri = await buildQuotePdf(profile, quote);
-      await sharePdf(uri);
-    } catch (e) {
-      Alert.alert('Could not create PDF', String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const setStatus = async (status: 'sent' | 'accepted' | 'rejected') => {
     const next = quotes.map((q) => (q.id === quote.id ? { ...q, status } : q));
@@ -166,8 +177,11 @@ export default function PreviewScreen() {
 
         <View style={styles.actions}>
           <Button title="✏️ Edit" variant="outline" onPress={() => router.push({ pathname: '/quote/[id]', params: { id: quote.id } })} />
-          <Button title="📄 Share PDF" loading={busy} onPress={doShare} />
+          <Button title="⬇️ Export / Download" onPress={() => setExportOpen(true)} />
         </View>
+        <Text style={styles.exportHint}>
+          Download as PDF, Word (.doc), HTML or plain text. On a phone, "Save to Files" is available in the share sheet.
+        </Text>
 
         <View style={styles.statusRow}>
           <Pressable style={[styles.statusBtn, styles.statusSent]} onPress={() => setStatus('sent')}>
@@ -181,7 +195,62 @@ export default function PreviewScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <ExportSheet
+        visible={exportOpen}
+        busyFormat={busyFormat}
+        onClose={() => setExportOpen(false)}
+        onPick={(f) => void doExport(f)}
+      />
     </Screen>
+  );
+}
+
+function ExportSheet({
+  visible,
+  busyFormat,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  busyFormat: ExportFormat | null;
+  onClose: () => void;
+  onPick: (f: ExportFormat) => void;
+}) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalWrap}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalTitle}>Export quotation</Text>
+              <Text style={styles.modalSub}>Choose a format to download</Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <Text style={styles.close}>Close</Text>
+            </Pressable>
+          </View>
+          {EXPORT_OPTIONS.map((o) => {
+            const busy = busyFormat === o.id;
+            return (
+              <Pressable
+                key={o.id}
+                style={({ pressed }) => [styles.exportRow, pressed && { opacity: 0.7 }, busy && { opacity: 0.5 }]}
+                onPress={() => onPick(o.id)}
+                disabled={busyFormat !== null}
+              >
+                <Text style={styles.exportIcon}>{o.icon}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.exportLabel}>{busy ? `Preparing ${o.label}…` : o.label}</Text>
+                  <Text style={styles.exportDesc}>{o.desc}</Text>
+                </View>
+                <Text style={styles.exportArrow}>›</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -223,6 +292,7 @@ const styles = StyleSheet.create({
   sectionLbl: { fontSize: 12, fontWeight: '800', color: palette.faint, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   body: { fontSize: 13.5, color: palette.sub, lineHeight: 20 },
   actions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+  exportHint: { fontSize: 12, color: palette.faint, textAlign: 'center', marginTop: 8, lineHeight: 17 },
   statusRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   statusBtn: { flex: 1, borderRadius: 10, paddingVertical: 11, alignItems: 'center' },
   statusSent: { backgroundColor: palette.amberSoft, borderWidth: 1, borderColor: '#fcd34d' },
@@ -230,4 +300,30 @@ const styles = StyleSheet.create({
   statusRejected: { backgroundColor: palette.red },
   statusText: { fontWeight: '700', color: palette.amber, fontSize: 13 },
   statusBtnTextWhite: { fontWeight: '700', color: '#fff', fontSize: 13 },
+  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.4)' },
+  modalSheet: {
+    backgroundColor: palette.bg,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    padding: 18,
+    paddingBottom: 44,
+  },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: palette.ink },
+  modalSub: { fontSize: 13, color: palette.sub, marginTop: 2 },
+  close: { color: palette.red, fontWeight: '700' },
+  exportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: palette.card,
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  exportIcon: { fontSize: 24, marginRight: 12 },
+  exportLabel: { fontSize: 15, fontWeight: '700', color: palette.ink },
+  exportDesc: { fontSize: 12.5, color: palette.sub, marginTop: 2 },
+  exportArrow: { fontSize: 20, color: palette.faint, fontWeight: '700', marginLeft: 8 },
 });
